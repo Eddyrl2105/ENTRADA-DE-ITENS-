@@ -21,10 +21,17 @@ export async function signUp(username: string, password: string) {
 
   const hashedPassword = await bcrypt.hash(password, 10)
 
-  const { data: existingUser } = await supabase.from("users").select("username").eq("username", username).single()
+  const { data: existingUser, error: existingUserError } = await supabase
+    .from("users")
+    .select("username")
+    .eq("username", username.trim())
+    .single()
 
   if (existingUser) {
     throw new Error("Nome de usuário já existe.")
+  } else if (existingUserError && existingUserError.code !== "PGRST100") {
+    // PGRST100 = No rows found (normal aqui)
+    throw new Error(`Erro ao verificar usuário: ${existingUserError.message}`)
   }
 
   const { data, error } = await supabase
@@ -54,10 +61,18 @@ export async function signIn(username: string, password: string) {
     throw new Error("Nome de usuário e senha são obrigatórios.")
   }
 
-  const { data: user, error } = await supabase.from("users").select("*").eq("username", username.trim()).single()
+  const { data: user, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("username", username.trim())
+    .single()
 
-  if (error || !user) {
+  if (error && error.code !== "PGRST100") {
     console.error("Erro ao buscar usuário (Server Action):", error)
+    throw new Error("Erro ao autenticar usuário.")
+  }
+
+  if (!user) {
     throw new Error("Usuário ou senha incorretos.")
   }
 
@@ -80,17 +95,23 @@ export async function signIn(username: string, password: string) {
  * @throws Error se o usuário não for mestre ou ocorrer um erro na inserção.
  */
 export async function bulkUploadProducts(userId: string, productsData: any[]) {
-  const { data: user, error: userError } = await supabase.from("users").select("is_master").eq("id", userId).single()
+  const { data: user, error: userError } = await supabase
+    .from("users")
+    .select("is_master")
+    .eq("id", userId)
+    .single()
 
   if (userError || !user || !user.is_master) {
     throw new Error("Apenas usuários mestres podem realizar esta operação.")
   }
 
+  const now = new Date().toISOString()
+
   const productsToInsert = productsData.map((product) => ({
     ...product,
-    user_id: userId, // Atribui o master user como criador
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    user_id: userId,
+    created_at: now,
+    updated_at: now,
   }))
 
   const { error: insertError } = await supabase.from("products").insert(productsToInsert)
